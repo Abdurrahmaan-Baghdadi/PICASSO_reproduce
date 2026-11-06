@@ -8,6 +8,8 @@ import torch.nn.functional as F
 
 class Accumulator:
     def __init__(self, d_sae: int, d: int, device: str = "cpu"):
+        device = "cpu" if str(device).startswith("mps") else device   # MPS has no float64
+        self.device = device
         self.n = 0
         self.sum_x = torch.zeros(d, dtype=torch.float64, device=device)
         self.sum_x2 = torch.zeros(d, dtype=torch.float64, device=device)
@@ -19,6 +21,7 @@ class Accumulator:
 
     @torch.no_grad()
     def update(self, x: torch.Tensor, x_hat: torch.Tensor, f: torch.Tensor) -> None:
+        x, x_hat, f = x.to(self.device), x_hat.to(self.device), f.to(self.device)
         self.n += len(x)
         self.sum_x += x.sum(0, dtype=torch.float64)
         self.sum_x2 += x.double().pow(2).sum(0)

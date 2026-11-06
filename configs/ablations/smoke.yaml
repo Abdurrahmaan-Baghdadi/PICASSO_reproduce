@@ -1,0 +1,37 @@
+# Local smoke test of the ablation machinery (minutes on a laptop, MPS or CPU).
+# Same groups as sae_brain.yaml, with a tiny dictionary and few epochs.
+#   python scripts/make_ablations.py configs/ablations/smoke.yaml
+#   bash scripts/run_ablation.sh ablations/smoke.tsv all
+
+base:
+  epochs: 2
+  expansion: 4
+  device: mps
+  val_batches: 5
+  log_every: 20
+  dead_threshold_samples: 100000
+  save_every_epoch: false
+
+eval:
+  device: mps
+  baselines: true
+  baseline_components: [30]
+  baseline_fit_rows: 20000
+
+groups:
+  main:
+    encoder: [virchow2, uni2]
+    seed: [42, 43]
+  topk:
+    encoder: [virchow2, uni2]
+    top_k: [16]
+  normalize:
+    encoder: [uni2]
+    normalize_input: [true]
+  matryoshka:
+    encoder: [uni2]
+    n_prefixes: [10]
+  token:
+    encoder: [virchow2]
+    store: [virchow2_meanpatch]
+    field: [meanpatch]

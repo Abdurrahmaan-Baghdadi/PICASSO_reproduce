@@ -1,0 +1,22 @@
+run_name	groups	encoder	store	seed	train_set	eval_set
+virchow2_cls_x32_k30_seed42	main	virchow2	virchow2	42	epochs=20 in_memory=true save_every_epoch=false	baselines=true
+virchow2_cls_x32_k30_seed43	main	virchow2	virchow2	43	epochs=20 in_memory=true save_every_epoch=false	baselines=true
+virchow2_cls_x32_k30_seed44	main	virchow2	virchow2	44	epochs=20 in_memory=true save_every_epoch=false	baselines=true
+uni2_cls_x32_k30_seed42	main	uni2	uni2	42	epochs=20 in_memory=true save_every_epoch=false	baselines=true
+uni2_cls_x32_k30_seed43	main	uni2	uni2	43	epochs=20 in_memory=true save_every_epoch=false	baselines=true
+uni2_cls_x32_k30_seed44	main	uni2	uni2	44	epochs=20 in_memory=true save_every_epoch=false	baselines=true
+virchow2_cls_x32_k16_seed42	topk	virchow2	virchow2	42	epochs=20 in_memory=true save_every_epoch=false top_k=16	baselines=true
+virchow2_cls_x32_k64_seed42	topk	virchow2	virchow2	42	epochs=20 in_memory=true save_every_epoch=false top_k=64	baselines=true
+uni2_cls_x32_k16_seed42	topk	uni2	uni2	42	epochs=20 in_memory=true save_every_epoch=false top_k=16	baselines=true
+uni2_cls_x32_k64_seed42	topk	uni2	uni2	42	epochs=20 in_memory=true save_every_epoch=false top_k=64	baselines=true
+virchow2_cls_x8_k30_seed42	expansion	virchow2	virchow2	42	epochs=20 in_memory=true save_every_epoch=false expansion=8	baselines=true
+virchow2_cls_x16_k30_seed42	expansion	virchow2	virchow2	42	epochs=20 in_memory=true save_every_epoch=false expansion=16	baselines=true
+uni2_cls_x8_k30_seed42	expansion	uni2	uni2	42	epochs=20 in_memory=true save_every_epoch=false expansion=8	baselines=true
+uni2_cls_x16_k30_seed42	expansion	uni2	uni2	42	epochs=20 in_memory=true save_every_epoch=false expansion=16	baselines=true
+virchow2_cls_x32_k30_norm_seed42	normalize	virchow2	virchow2	42	epochs=20 in_memory=true save_every_epoch=false normalize_input=true	baselines=true
+uni2_cls_x32_k30_norm_seed42	normalize	uni2	uni2	42	epochs=20 in_memory=true save_every_epoch=false normalize_input=true	baselines=true
+virchow2_cls_x32_k30_mat10_seed42	matryoshka	virchow2	virchow2	42	epochs=20 in_memory=true save_every_epoch=false n_prefixes=10	baselines=true
+uni2_cls_x32_k30_mat10_seed42	matryoshka	uni2	uni2	42	epochs=20 in_memory=true save_every_epoch=false n_prefixes=10	baselines=true
+virchow2_cls_x32_k30_ep5_seed42	epochs	virchow2	virchow2	42	epochs=5 in_memory=true save_every_epoch=false	baselines=true
+uni2_cls_x32_k30_ep5_seed42	epochs	uni2	uni2	42	epochs=5 in_memory=true save_every_epoch=false	baselines=true
+virchow2_meanpatch_x32_k30_seed42	token	virchow2	virchow2_meanpatch	42	epochs=20 in_memory=true save_every_epoch=false field=meanpatch	baselines=true field=meanpatch

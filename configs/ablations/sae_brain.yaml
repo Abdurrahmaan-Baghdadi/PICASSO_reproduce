@@ -1,0 +1,46 @@
+# SAE ablations on TCGA-GBM + TCGA-LGG, Virchow2 vs UNI2, on the same tiles and split.
+# scripts/make_ablations.py expands every group into the product of its lists, merges equal runs,
+# and writes one row per run; scripts/run_ablation.sh trains + evaluates one row.
+#
+# Special keys: encoder (picks $DATA_ROOT/store/<store>), store (default: the encoder),
+# seed. Every other key is a --set override of configs/sae/train.yaml.
+# About 9.7M train tiles, so 20 epochs (docs/train_on_subset.md); the train split fits in RAM.
+
+base:
+  epochs: 20
+  in_memory: true
+  save_every_epoch: false    # 21 runs x 20 epochs x up to 0.6 GB; log.jsonl keeps the per-epoch val metrics
+
+eval:                         # --set overrides of configs/sae/evaluate.yaml for every run
+  baselines: true
+
+groups:
+  # Paper recipe (k=30, x32), three seeds: encoder differences must beat seed-to-seed spread.
+  main:
+    encoder: [virchow2, uni2]
+    seed: [42, 43, 44]
+  # Sparsity: concepts per tile.
+  topk:
+    encoder: [virchow2, uni2]
+    top_k: [16, 64]
+  # Dictionary size.
+  expansion:
+    encoder: [virchow2, uni2]
+    expansion: [8, 16]
+  # z-scored input (SAELens normalize_activations); removes the scale gap between encoders.
+  normalize:
+    encoder: [virchow2, uni2]
+    normalize_input: [true]
+  # Matryoshka nested dictionaries: coarse-to-fine concept hierarchy.
+  matryoshka:
+    encoder: [virchow2, uni2]
+    n_prefixes: [10]
+  # Paper default of 5 epochs, to check the 20-epoch choice for a small split.
+  epochs:
+    encoder: [virchow2, uni2]
+    epochs: [5]
+  # Virchow2 input token: mean of patch tokens instead of CLS (needs import --meanpatch).
+  token:
+    encoder: [virchow2]
+    store: [virchow2_meanpatch]
+    field: [meanpatch]

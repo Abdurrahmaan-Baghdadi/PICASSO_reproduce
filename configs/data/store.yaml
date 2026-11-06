@@ -1,4 +1,4 @@
-# Flat fp16 stores with an 80/10/10 slide-level split (stratified by project).
+# Flat fp16 stores with an 80/10/10 patient-level split (stratified by project).
 embeddings_dir: ${DATA_ROOT}/embeddings/${ENCODER}
 tiles_dir: ${DATA_ROOT}/tiles
 output_dir: ${STORE_DIR}
@@ -7,3 +7,4 @@ projects: null
 val_frac: 0.1
 test_frac: 0.1
 seed: 0
+split_by: patient             # all slides of a TCGA patient in one split; slide = old per-slide split

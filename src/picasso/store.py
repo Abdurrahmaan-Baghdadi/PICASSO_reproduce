@@ -1,7 +1,8 @@
-"""Consolidate per-slide embeddings into flat fp16 stores with a slide-level split.
+"""Consolidate per-slide embeddings into flat fp16 stores with a patient-level split.
 
 Reads ``embeddings_dir/<slide_id>.<field>.npy`` for every slide with a ``.done`` marker,
-assigns each slide to train/val/test (80/10/10, seeded, stratified by project) and writes
+assigns each patient's slides to train/val/test (80/10/10 of patients, seeded, stratified by
+project) and writes
 
   ``output_dir/<field>_{train,val,test}.f16``   row-major [n, d] float16
   ``output_dir/<field>_{train,val,test}.index.parquet``   slide_id, project, start, n
@@ -35,20 +36,36 @@ class StoreConfig:
     val_frac: float = 0.1
     test_frac: float = 0.1
     seed: int = 0
+    split_by: str = "patient"  # patient (TCGA barcode) or slide
+
+
+def split_unit(slide_id: str, split_by: str) -> str:
+    # TCGA barcodes start with the patient: TCGA-<site>-<participant> (12 characters)
+    if split_by == "patient" and slide_id.startswith("TCGA-"):
+        return slide_id[:12]
+    return slide_id
 
 
 def assign_splits(summary: pl.DataFrame, cfg: StoreConfig) -> dict[str, list[str]]:
+    """All slides of one patient go to the same split (split_by=slide splits slides independently)."""
+    if cfg.split_by not in ("patient", "slide"):
+        raise ValueError(f"split_by must be patient or slide, got {cfg.split_by!r}")
     rng = np.random.default_rng(cfg.seed)
     splits = {"train": [], "val": [], "test": []}
     for proj, group in summary.group_by("project", maintain_order=True):
-        ids = sorted(group["slide_id"].to_list())
-        rng.shuffle(ids)
-        n = len(ids)
+        units: dict[str, list[str]] = {}
+        for sid in sorted(group["slide_id"].to_list()):
+            units.setdefault(split_unit(sid, cfg.split_by), []).append(sid)
+        keys = sorted(units)
+        rng.shuffle(keys)
+        n = len(keys)
         n_test = int(round(n * cfg.test_frac))
         n_val = int(round(n * cfg.val_frac))
-        splits["test"] += ids[:n_test]
-        splits["val"] += ids[n_test : n_test + n_val]
-        splits["train"] += ids[n_test + n_val :]
+        for name, part in (("test", keys[:n_test]), ("val", keys[n_test : n_test + n_val]), ("train", keys[n_test + n_val :])):
+            splits[name] += [sid for k in part for sid in units[k]]
+    seen = {name: {split_unit(s, cfg.split_by) for s in ids} for name, ids in splits.items()}
+    if seen["train"] & seen["val"] or seen["train"] & seen["test"] or seen["val"] & seen["test"]:
+        raise ValueError("a patient has slides in two projects and landed in two splits")
     return splits
 
 

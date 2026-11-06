@@ -2,6 +2,7 @@
 # Stage 6: (VAE latent, Virchow2 CLS) training pairs for Emb2Img, one process per GPU, then merge.
 #   GPUS="0 1 2 3 4 5 6 7" bash pipeline/06_build_pairs.sh
 set -euo pipefail; cd "$(dirname "$0")/.."; source env.sh
+if [ "$ENCODER" != virchow2 ]; then echo "this stage supports ENCODER=virchow2 only (got $ENCODER)" >&2; exit 1; fi
 arr=(${GPUS:-0}); n=${#arr[@]}
 for i in "${!arr[@]}"; do
   CUDA_VISIBLE_DEVICES=${arr[$i]} python -m picasso.emb2img.pairs --config configs/emb2img/pairs.yaml \

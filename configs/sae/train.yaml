@@ -1,14 +1,15 @@
 # PICASSO recipe: TopK SAE on Virchow2 CLS (d=1280), expansion 32 (h=40,960), k=30,
 # MSE (+ AuxK dead-latent loss, SAELens default), Adam 1e-4, batch 2048.
+# The width d comes from the store, so the same recipe runs on UNI2 (d=1536, h=49,152).
 # 5 epochs over the train split (123M tiles for full TCGA), as in the paper.
 # in_memory: true loads the train split into RAM (about 315 GB) for a full shuffle;
 # false streams it from disk with a block shuffle.
 store_dir: ${STORE_DIR}
-output_dir: ${OUTPUT_ROOT}/sae/virchow2_cls_x32_k30
+output_dir: ${OUTPUT_ROOT}/sae/${ENCODER}_cls_x32_k30
 field: cls
 expansion: 32
 top_k: 30
-aux_k: 640
+aux_k: null                  # null = d // 2 (SAELens default; 640 for Virchow2, 768 for UNI2)
 aux_alpha: 0.03125
 n_prefixes: 1
 dead_threshold_samples: 2000000

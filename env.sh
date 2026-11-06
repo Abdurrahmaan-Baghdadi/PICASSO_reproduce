@@ -1,10 +1,12 @@
 # Source before running any stage:  source env.sh
 # DATA_ROOT: slides, tiles, embeddings.  OUTPUT_ROOT: checkpoints, logs.
 # STORE_DIR / PAIRS_DIR: training data of the SAE / Emb2Img (override them to train on a subset).
+# ENCODER: tile encoder whose embeddings the SAE stages read (virchow2 | uni2).
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export DATA_ROOT="${DATA_ROOT:-$REPO/data}"
 export OUTPUT_ROOT="${OUTPUT_ROOT:-$REPO/outputs}"
-export STORE_DIR="${STORE_DIR:-$DATA_ROOT/store/virchow2}"      # SAE train/val/test arrays
+export ENCODER="${ENCODER:-virchow2}"
+export STORE_DIR="${STORE_DIR:-$DATA_ROOT/store/$ENCODER}"      # SAE train/val/test arrays
 export PAIRS_DIR="${PAIRS_DIR:-$DATA_ROOT/emb2img_pairs}"       # Emb2Img training pairs
 export PYTHONPATH="$REPO/src:${PYTHONPATH:-}"
 # Old system libstdc++ (no GLIBCXX_3.4.29) breaks conda's pillow/openslide once torch is imported:

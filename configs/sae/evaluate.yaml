@@ -1,7 +1,7 @@
 # Test-set metrics (explained variance, L0, dead latents, active concepts) + PCA / k-means baselines.
-checkpoint: ${OUTPUT_ROOT}/sae/virchow2_cls_x32_k30/sae.pt
+checkpoint: ${OUTPUT_ROOT}/sae/${ENCODER}_cls_x32_k30_seed42/sae.pt
 store_dir: ${STORE_DIR}
-output_dir: ${OUTPUT_ROOT}/sae/virchow2_cls_x32_k30/eval
+output_dir: ${OUTPUT_ROOT}/sae/${ENCODER}_cls_x32_k30_seed42/eval
 field: cls
 split: test
 batch_size: 8192

@@ -1,5 +1,5 @@
 # Flat fp16 stores with an 80/10/10 slide-level split (stratified by project).
-embeddings_dir: ${DATA_ROOT}/embeddings/virchow2
+embeddings_dir: ${DATA_ROOT}/embeddings/${ENCODER}
 tiles_dir: ${DATA_ROOT}/tiles
 output_dir: ${STORE_DIR}
 fields: [cls]                 # add meanpatch to also store mean patch tokens

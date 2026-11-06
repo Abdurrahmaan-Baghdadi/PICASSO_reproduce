@@ -34,7 +34,7 @@ class TrainConfig:
     field: str = "cls"
     expansion: int = 32
     top_k: int = 30
-    aux_k: int = 640
+    aux_k: int | None = None             # None = d // 2 (SAELens default)
     aux_alpha: float = 1 / 32
     n_prefixes: int = 1                  # 1 = plain TopK (PICASSO); >1 = Matryoshka
     dead_threshold_samples: int = 2_000_000
@@ -52,7 +52,7 @@ class TrainConfig:
     log_every: int = 200
     save_every_epoch: bool = True
     seed: int = 42
-    device: str = "cuda"
+    device: str = "cuda"                 # "mps" / "cpu" for local smoke tests
 
 
 def sample_prefixes(d_sae: int, n_prefixes: int) -> torch.Tensor | None:
@@ -120,7 +120,8 @@ def run(cfg: TrainConfig) -> pathlib.Path:
     normalize = (lambda x: (x - mean) / std) if cfg.normalize_input else (lambda x: x)
 
     d_sae = cfg.expansion * train.d
-    sae = TopKSAE(SAEConfig(train.d, d_sae, cfg.top_k, cfg.aux_k, cfg.aux_alpha))
+    aux_k = cfg.aux_k if cfg.aux_k is not None else train.d // 2
+    sae = TopKSAE(SAEConfig(train.d, d_sae, cfg.top_k, aux_k, cfg.aux_alpha))
     if cfg.datapoint_init_blend > 0:
         datapoint_init(sae, train, cfg.datapoint_init_blend, cfg.seed, lambda x: normalize(x.to(cfg.device)).cpu())
     sae.to(cfg.device).train()

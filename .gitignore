@@ -7,3 +7,6 @@ __pycache__/
 *.npz
 *.safetensors
 *.svs
+/data_*/
+/outputs_*/
+/slurm_logs/

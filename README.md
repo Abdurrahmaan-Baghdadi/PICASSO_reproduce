@@ -37,6 +37,8 @@ The slide list is `manifests/tcga_dx_all.csv`. To refresh it from the GDC, run
 
 To train on some cancer types only, for example brain tumours, see
 [docs/train_on_subset.md](docs/train_on_subset.md).
+To train the SAE on TRIDENT features, with Virchow2 or UNI2, and compare the two, see
+[docs/uni2_ablations.md](docs/uni2_ablations.md).
 
 ### SAE (stage 5)
 

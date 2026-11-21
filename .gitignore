@@ -10,3 +10,5 @@ __pycache__/
 /data_*/
 /outputs_*/
 /slurm_logs/
+/tacc.env
+/ablations/smoke_tacc.tsv

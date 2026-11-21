@@ -53,33 +53,41 @@ code keeps its float64 sums on the CPU because MPS has no float64.
 
 ## TACC
 
-Set up once, on a login node:
+Everything goes through `slurm/submit.sh`, which reads your settings from `tacc.env`.
+On a login node, once:
 
 ```bash
-cd $WORK && git clone https://github.com/Pediatric-Brain-Tumor/PICASSO_reproduce.git && cd PICASSO_reproduce
-git checkout uni2-ablations
-# Miniconda under $WORK; on Vista (ARM) build the env on Vista itself
-conda create -n picasso python=3.12 -y && conda activate picasso && pip install -e .
-python scripts/make_ablations.py configs/ablations/sae_brain.yaml
+cd $WORK && git clone https://github.com/Abdurrahmaan-Baghdadi/PICASSO_reproduce.git && cd PICASSO_reproduce && git checkout uni2-ablations
+cp tacc.env.example tacc.env && nano tacc.env    # allocation, system, TRIDENT folder, output folders
+bash slurm/submit.sh setup                       # builds the conda env and checks everything below
 ```
 
-Then submit the three jobs from the repo root, each after the one before it:
+`setup` creates the conda env if it is missing, installs the repo, and checks that torch has
+CUDA, that both TRIDENT feature folders are readable, that the queues exist and that the
+allocation is accepted. It ends with "All set", or lists what to fix. Then:
 
 ```bash
-export DATA_ROOT=$SCRATCH/picasso/data_brain OUTPUT_ROOT=$WORK/picasso/outputs_brain
-export TRIDENT_DIR=/scratch/<project>/<user>/data/wsi_processed/tcga_gbm_lgg/contours_hest_0.5_holes/20x_256px_0px_overlap
-export SLIDES_DIR=/scratch/<project>/<user>/pbt_picasso/tcga/slides
-export ALLOCATION=<your TACC project>
-bash slurm/submit.sh data                                        # prints the job id
-DEPEND=<data job id> bash slurm/submit.sh sae ablations/sae_brain.tsv
-DEPEND=<sae array job id> bash slurm/submit.sh compare ablations/sae_brain.tsv
+bash slurm/submit.sh test    # dev queues, about an hour: 60 slides, 9 tiny SAEs and the comparison
+bash slurm/submit.sh all     # the real run: data -> 21 SAEs -> comparison, chained
 ```
 
-- `SYSTEM=ls6` (default) uses `normal` and `gpu-a100`, three runs per node (one per A100).
-  `SYSTEM=vista` uses `gg` and `gh`, one run per node. `CPU_PART` / `GPU_PART` override them.
-- The jobs inherit the exported variables; `CONDA_SH` and `CONDA_ENV` point at the env if it
-  is not `$WORK/miniconda3` / `picasso`.
-- Reruns skip finished runs, so a timed-out array can simply be resubmitted.
+Both print their job ids and where the results go; follow them with `squeue -u $USER` and
+the logs in `slurm_logs/`. `test` writes to `<DATA_ROOT>_test` and `<OUTPUT_ROOT>_test`, so the
+real run starts clean. It passed when `<OUTPUT_ROOT>_test/compare/smoke_tacc/` holds
+`metrics.csv`, `matching.csv` and `probes.csv`.
+
+- `SYSTEM=ls6` (default) uses `normal` and `gpu-a100`, three runs per node (one per A100), and
+  `development` / `gpu-a100-dev` for `test`. `SYSTEM=vista` uses `gg` and `gh`, one run per
+  node, and `gh-dev` for `test`. `CPU_PART`, `GPU_PART`, `TEST_CPU_PART` and `TEST_GPU_PART` in
+  `tacc.env` override them.
+- If an SAE run fails, its job fails and the comparison waits forever
+  (`DependencyNeverSatisfied` in `squeue`): `scancel` it, read `<OUTPUT_ROOT>/logs/sae_<run>.log`,
+  fix, and rerun `bash slurm/submit.sh all`. Finished slides and SAEs are skipped, so reruns
+  also resume timed-out jobs.
+- Single stages: `bash slurm/submit.sh data`, `... sae <table.tsv>`, `... compare <table.tsv>`,
+  with `DEPEND=<job id>` to wait for another job. Extra arguments go to `sbatch`, e.g. `-t 02:00:00`.
+- After editing `configs/ablations/sae_brain.yaml`, rerun
+  `python scripts/make_ablations.py configs/ablations/sae_brain.yaml` before `all`.
 - `$SCRATCH` is purged when files go unused, so keep `OUTPUT_ROOT` on `$WORK`. Rebuilding
   `DATA_ROOT` is one `data` job.
 - Each run loads its train split into RAM (`in_memory: true`): about 25 GB for Virchow2 and

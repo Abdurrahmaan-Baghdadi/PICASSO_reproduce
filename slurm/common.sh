@@ -1,8 +1,11 @@
 # Sourced by the slurm/*.sbatch jobs: conda env + repo env.
 # CONDA_SH: conda's profile script (TACC: install Miniconda under $WORK, not $HOME).
 # CONDA_ENV: env with this repo installed (pip install -e .).
+# Conda's scripts read unset variables, so -u is off while they run.
+set +u
 source "${CONDA_SH:-$WORK/miniconda3/etc/profile.d/conda.sh}"
 conda activate "${CONDA_ENV:-picasso}"
+set -u
 cd "$SLURM_SUBMIT_DIR"
 source env.sh
 echo "host $(hostname)  job ${SLURM_JOB_ID:-}  DATA_ROOT=$DATA_ROOT  OUTPUT_ROOT=$OUTPUT_ROOT"

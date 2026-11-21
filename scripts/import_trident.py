@@ -32,7 +32,7 @@ UIDs are), and all folders must come from the same tiling (e.g. 20x, 256 px).
     python scripts/import_trident.py --coords-dir .../contours_hest_0.5_holes/20x_256px_0px_overlap \\
         --projects TCGA-GBM,TCGA-LGG --encoders virchow2,uni2 --data-root data_brain
 """
-import argparse, concurrent.futures as cf, json, pathlib, sys, zlib
+import argparse, concurrent.futures as cf, json, multiprocessing as mp, os, pathlib, sys, zlib
 
 import h5py
 import numpy as np
@@ -211,19 +211,27 @@ def main() -> None:
                    if old.get(k) != settings[k]]
         if changed:
             sys.exit(f"{a.data_root} was imported with other settings ({changed}); use a new --data-root or --force")
-    print(f"importing {len(chosen)} slides with {', '.join(encoders)}")
-    svs = {f.stem: str(f) for f in a.slides_dir.rglob("*.svs")} if a.slides_dir else {}
+    svs = {}
+    if a.slides_dir:
+        print(f"listing .svs files under {a.slides_dir}", flush=True)
+        svs = {f.stem: str(f) for f in a.slides_dir.rglob("*.svs")}
+    workers = max(1, min(a.workers, 32, len(chosen)))   # more processes only add Lustre contention
+    print(f"importing {len(chosen)} slides with {', '.join(encoders)}, {workers} processes", flush=True)
 
     (a.data_root / "tiles").mkdir(parents=True, exist_ok=True)
     infos = []
-    with cf.ProcessPoolExecutor(a.workers) as pool:
+    every = max(1, min(100, len(chosen) // 10))
+    # spawn, not Linux's default fork: Polars' thread pool is already running here, and forked
+    # children can deadlock on it (the job then hangs until its time limit). One Polars thread each.
+    os.environ.setdefault("POLARS_MAX_THREADS", "1")
+    with cf.ProcessPoolExecutor(workers, mp_context=mp.get_context("spawn")) as pool:
         futs = [pool.submit(import_slide, sid, dir_of[sid], a, encoders, project_of[sid], patient_of.get(sid), svs.get(sid, "")) for sid in chosen]
         for k, fut in enumerate(futs):
             info = fut.result()
             infos.append(info)
             if "error" in info:
-                print("SKIPPED", info["slide_id"], info["error"])
-            if (k + 1) % 100 == 0:
+                print("SKIPPED", info["slide_id"], info["error"], flush=True)
+            if (k + 1) % every == 0 or k + 1 == len(chosen):
                 print(f"{k + 1}/{len(chosen)}", flush=True)
     ok = [i for i in infos if "error" not in i]
     if not ok:

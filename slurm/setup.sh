@@ -2,6 +2,8 @@
 # One-time TACC setup, run on a login node through `bash slurm/submit.sh setup` (which reads tacc.env).
 # Creates the conda env if it is missing, then checks everything the jobs need and says what to fix.
 set -uo pipefail; cd "$(dirname "$0")/.."
+# Login nodes cap threads per user; Polars and BLAS otherwise start one thread per core.
+export POLARS_MAX_THREADS=${POLARS_MAX_THREADS:-4} OMP_NUM_THREADS=${OMP_NUM_THREADS:-4}
 ok() { echo "  ok    $*"; }
 bad() { echo "  FIX   $*"; problems=$((problems + 1)); }
 problems=0

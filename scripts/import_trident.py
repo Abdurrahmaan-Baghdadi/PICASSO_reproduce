@@ -108,7 +108,17 @@ def main() -> None:
     if a.projects:
         man = man.filter(pl.col("project").is_in(a.projects.split(",")))
     project_of = {f.removesuffix(".svs"): proj for f, proj in zip(man["file_name"], man["project"])}
-    have = {enc: {f.stem for f in features_file(a, enc, "x").parent.glob("*.h5")} & set(project_of) for enc in encoders}
+    found = {enc: {f.stem for f in features_file(a, enc, "x").parent.glob("*.h5")} for enc in encoders}
+    for enc in encoders:
+        if not found[enc]:
+            sys.exit(f"no .h5 files in {features_file(a, enc, 'x').parent}: is --coords-dir the TRIDENT "
+                     "<mag>x_<px>px_<overlap>px_overlap folder?")
+    have = {enc: found[enc] & set(project_of) for enc in encoders}
+    if not any(have.values()):
+        example = sorted(found[encoders[0]])[0]
+        sys.exit(f"none of the {len(found[encoders[0]])} slides in {a.coords_dir} is in {a.manifest}"
+                 f"{' for ' + a.projects if a.projects else ''} (e.g. {example}). The manifest gives each slide "
+                 "its project, so slides from another dataset need a manifest of their own (--manifest).")
     paired = set(project_of).intersection(*have.values())
     for enc in encoders:
         print(f"{enc}: {len(have[enc])} slides with features, {len(have[enc] - paired)} dropped (missing for another encoder)")
@@ -134,6 +144,8 @@ def main() -> None:
             if (k + 1) % 100 == 0:
                 print(f"{k + 1}/{len(chosen)}", flush=True)
     ok = [i for i in infos if "error" not in i]
+    if not ok:
+        sys.exit(f"no slide imported: {len(infos)} skipped (reasons above)")
     pl.DataFrame(ok).write_parquet(a.data_root / "tiles" / "slides_summary.parquet")
     n_tiles = int(sum(i["n_tiles"] for i in ok))
     record.write_text(json.dumps(settings | {"n_slides": len(ok), "n_tiles": n_tiles}, indent=1) + "\n")

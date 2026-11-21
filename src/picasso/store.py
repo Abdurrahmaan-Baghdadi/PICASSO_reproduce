@@ -36,7 +36,7 @@ class StoreConfig:
     val_frac: float = 0.1
     test_frac: float = 0.1
     seed: int = 0
-    split_by: str = "patient"  # patient (TCGA barcode) or slide
+    split_by: str = "patient"  # patient (manifest column, else TCGA barcode) or slide
 
 
 def split_unit(slide_id: str, split_by: str) -> str:
@@ -47,25 +47,42 @@ def split_unit(slide_id: str, split_by: str) -> str:
 
 
 def assign_splits(summary: pl.DataFrame, cfg: StoreConfig) -> dict[str, list[str]]:
-    """All slides of one patient go to the same split (split_by=slide splits slides independently)."""
+    """All slides of one patient go to the same split (split_by=slide splits slides independently).
+
+    The patient comes from the summary's ``patient`` column (scripts/import_trident.py copies it
+    from the manifest), else from the TCGA barcode; a slide with neither is its own unit. Splits are
+    stratified by project; a patient whose slides have several projects counts under the most common.
+    """
     if cfg.split_by not in ("patient", "slide"):
         raise ValueError(f"split_by must be patient or slide, got {cfg.split_by!r}")
+    patient_of = {}
+    if cfg.split_by == "patient" and "patient" in summary.columns:
+        patient_of = {s: p for s, p in zip(summary["slide_id"], summary["patient"]) if p}
+    proj_of = dict(zip(summary["slide_id"], summary["project"]))
+    units: dict[str, list[str]] = {}
+    for sid in sorted(summary["slide_id"].to_list()):
+        units.setdefault(patient_of.get(sid) or split_unit(sid, cfg.split_by), []).append(sid)
+    by_project: dict[str, list[str]] = {}
+    mixed = 0
+    for k in sorted(units):
+        projs = [proj_of[s] for s in units[k]]
+        main = max(sorted(set(projs)), key=projs.count)
+        mixed += len(set(projs)) > 1
+        by_project.setdefault(main, []).append(k)
+    if mixed:
+        logger.info("%d patients have slides in several projects; each counts under its most common", mixed)
     rng = np.random.default_rng(cfg.seed)
     splits = {"train": [], "val": [], "test": []}
-    for proj, group in summary.group_by("project", maintain_order=True):
-        units: dict[str, list[str]] = {}
-        for sid in sorted(group["slide_id"].to_list()):
-            units.setdefault(split_unit(sid, cfg.split_by), []).append(sid)
-        keys = sorted(units)
+    for proj in dict.fromkeys(summary["project"].to_list()):   # projects in order of appearance
+        keys = by_project.get(proj, [])
+        if not keys:
+            continue
         rng.shuffle(keys)
         n = len(keys)
         n_test = int(round(n * cfg.test_frac))
         n_val = int(round(n * cfg.val_frac))
         for name, part in (("test", keys[:n_test]), ("val", keys[n_test : n_test + n_val]), ("train", keys[n_test + n_val :])):
             splits[name] += [sid for k in part for sid in units[k]]
-    seen = {name: {split_unit(s, cfg.split_by) for s in ids} for name, ids in splits.items()}
-    if seen["train"] & seen["val"] or seen["train"] & seen["test"] or seen["val"] & seen["test"]:
-        raise ValueError("a patient has slides in two projects and landed in two splits")
     return splits
 
 
@@ -101,6 +118,10 @@ def run(cfg: StoreConfig) -> pathlib.Path:
     logger.info("%d slides with embeddings", summary.height)
     cfg.output_dir.mkdir(parents=True, exist_ok=True)
     splits = assign_splits(summary, cfg)
+    empty = [k for k, v in splits.items() if not v]
+    if empty:
+        raise ValueError(f"the {', '.join(empty)} split is empty: {summary.height} slides are too few patients per "
+                         f"project for {cfg.val_frac:.0%} val / {cfg.test_frac:.0%} test")
     dump_json(cfg.output_dir / "splits.json", splits)
     proj_of = dict(zip(summary["slide_id"], summary["project"]))
     meta = {"fields": {}, "splits": {k: len(v) for k, v in splits.items()}, "seed": cfg.seed}

@@ -35,12 +35,25 @@ else
 fi
 
 echo "Data"
-if [ -n "${TRIDENT_DIR:-}" ]; then
+IFS=: read -ra DIRS <<< "${TRIDENT_DIR:-}"
+for dir in ${DIRS[@]+"${DIRS[@]}"}; do
   for enc in virchow2 uni_v2; do
-    d=$TRIDENT_DIR/features_$enc
-    if [ -r "$d" ]; then ok "features_$enc: $(find "$d" -maxdepth 1 -name '*.h5' | wc -l | tr -d ' ') slides"
+    d=$dir/features_$enc
+    if [ -r "$d" ]; then ok "$d: $(find "$d" -maxdepth 1 -name '*.h5' | wc -l | tr -d ' ') slides"
     else bad "cannot read $d (missing, or no permission)"; fi
   done
+done
+if [ -n "${TRIDENT_DIR:-}" ] && command -v python > /dev/null && python -c "import polars" 2> /dev/null; then
+  man=${MANIFEST:-manifests/tcga_dx_all.csv}
+  proj=${PROJECTS:-}; [ -n "${MANIFEST:-}" ] || proj=${proj:-TCGA-GBM,TCGA-LGG}
+  IFS=: read -ra MANS <<< "$man"
+  if out=$(python scripts/import_trident.py --check --coords-dir "${DIRS[@]}" --data-root "${DATA_ROOT:-.}" \
+             --manifest "${MANS[@]}" ${proj:+--projects "$proj"} 2>&1); then
+    summary=$(echo "$out" | grep -E "^[0-9]+ slides matched")
+    ok "manifest(s) ${man//:/, }: $summary"
+    echo "$out" | grep -E "slides in the manifest" | sed 's/^/          /'
+    echo "$out" | sed -n '/^[0-9]* slides matched/,$p' | tail -n +2 | head -10 | sed 's/^/          /'
+  else bad "$(echo "$out" | tail -1)"; fi
 fi
 for d in "${DATA_ROOT:-}" "${OUTPUT_ROOT:-}"; do
   [ -n "$d" ] || continue

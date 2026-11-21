@@ -93,6 +93,41 @@ real run starts clean. It passed when `<OUTPUT_ROOT>_test/compare/smoke_tacc/` h
 - Each run loads its train split into RAM (`in_memory: true`): about 25 GB for Virchow2 and
   30 GB for UNI2, so three runs fit on one 256 GB Lonestar6 node.
 
+## Other datasets, and several at once
+
+Any TRIDENT output imports the same way once its slides are listed in a manifest: a CSV with
+one row per slide and the columns
+
+| Column | Content |
+|---|---|
+| `slide_id` | The TRIDENT file name without `.h5` (or `file_name`, the slide file, e.g. `x.svs`) |
+| `project` | The slide's label, e.g. diagnosis. It stratifies the split and is what `probes.csv` predicts |
+| `patient` | Optional (or `case`). All slides of a patient go to the same split; without it the split is per slide |
+
+Other columns are ignored. The TCGA manifest (`manifests/tcga_dx_all.csv`) is one already.
+
+To train on several datasets at once, list their TRIDENT folders and manifests in `tacc.env`,
+separated by `:`. They import into one store with one patient-level split, stratified by project:
+
+```bash
+TRIDENT_DIR=/path/tcga_gbm_lgg/.../20x_256px_0px_overlap:/path/ccdi_mci/.../20x_256px_0px_overlap
+MANIFEST=manifests/tcga_dx_all.csv:/path/ccdi_manifest.csv
+PROJECTS=
+```
+
+`bash slurm/submit.sh setup` reports how many slides each folder matches and the slides per
+project. Things to keep in mind:
+
+- Slide ids must be unique across folders, and all folders should come from the same TRIDENT
+  tiling (20x, 256 px) and encoders.
+- `PROJECTS` filters every manifest. Leave it empty to keep everything a manifest lists and
+  TRIDENT has features for (the TCGA folder only holds GBM and LGG).
+- With mixed datasets, the probes partly learn which dataset a tile came from, because the
+  projects of different datasets never overlap. Compare encoders with that in mind.
+- A larger train split needs more RAM (`in_memory: true` loads it): roughly 2.6 KB per tile for
+  Virchow2 and 3 KB for UNI2. Three UNI2 runs on one 256 GB Lonestar6 node fit up to about
+  25M train tiles; set `PER_NODE=1` (or `in_memory: false` in the grid) above that.
+
 ## The grid (`configs/ablations/sae_brain.yaml`, 21 runs)
 
 | Group | Varies | Question |
@@ -120,4 +155,4 @@ rerun `make_ablations.py`; finished runs are kept.
 | `main_summary.csv` | Mean and std over seeds, per encoder |
 | `matching.csv` | Best-match correlation of concepts, for seed pairs and encoder pairs |
 | `matches_<A>__<B>.parquet` | Best match of every concept, to look at shared and encoder-only concepts |
-| `probes.csv` | GBM vs LGG logistic probes, raw embeddings vs SAE codes (tile and slide AUC) |
+| `probes.csv` | Logistic probes predicting the manifest's `project` (GBM vs LGG for TCGA), raw embeddings vs SAE codes (tile and slide AUC; mean one-vs-rest AUC with more than two projects) |

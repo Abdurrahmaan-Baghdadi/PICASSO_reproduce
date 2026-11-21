@@ -10,8 +10,10 @@ run on the same ``--n-rows`` random test tiles. Writes to ``--out``:
                         of the other SAE (A->B and B->A). Seed pairs give the within-encoder baseline;
                         encoder pairs say which concepts the two encoders share.
   ``matches_<A>__<B>.parquet``  per-concept best match of every pair
-  ``probes.csv``        GBM vs LGG logistic probes on raw embeddings and on SAE codes
-                        (tile AUC and slide AUC of the mean tile probability), for ``--probe-groups``
+  ``probes.csv``        logistic probes predicting each tile's project (the manifest label, e.g.
+                        GBM vs LGG) from raw embeddings and from SAE codes, for ``--probe-groups``:
+                        tile AUC and slide AUC of the mean tile probability. With more than two
+                        projects, the AUC is the mean one-vs-rest AUC over projects in the test split.
 
     python scripts/compare_saes.py ablations/sae_brain.tsv --device cuda
 """
@@ -117,15 +119,27 @@ def match(A: tuple, B: tuple, a) -> tuple[dict, pl.DataFrame]:
     return summary, per_concept
 
 
-def probe(x_tr, y_tr, x_te, y_te, slide_te) -> dict:
-    from sklearn.linear_model import LogisticRegression
+def auc(y: np.ndarray, prob: np.ndarray, classes: np.ndarray) -> tuple[float, int]:
+    """Binary AUC for two classes, else mean one-vs-rest AUC over classes with positives and negatives."""
     from sklearn.metrics import roc_auc_score
 
+    if len(classes) == 2:
+        return (float(roc_auc_score(y == classes[1], prob[:, 1])), 2) if len(set(y)) == 2 else (float("nan"), 0)
+    scores = [roc_auc_score(y == c, prob[:, j]) for j, c in enumerate(classes) if 0 < (y == c).sum() < len(y)]
+    return (float(np.mean(scores)), len(scores)) if scores else (float("nan"), 0)
+
+
+def probe(x_tr, y_tr, x_te, y_te, slide_te) -> dict:
+    from sklearn.linear_model import LogisticRegression
+
     clf = LogisticRegression(max_iter=2000, C=1.0).fit(x_tr, y_tr)
-    prob = clf.predict_proba(x_te)[:, 1]
-    df = pl.DataFrame({"slide": slide_te, "y": y_te, "p": prob}).group_by("slide").agg(pl.col("y").first(), pl.col("p").mean())
-    return {"tile_auc": float(roc_auc_score(y_te, prob)), "slide_auc": float(roc_auc_score(df["y"], df["p"])),
-            "n_test_slides": df.height}
+    prob = clf.predict_proba(x_te)
+    tile_auc, n_scored = auc(y_te, prob, clf.classes_)
+    per_slide = pl.DataFrame({"slide": slide_te, "y": y_te}).with_columns(pl.Series("p", list(prob)))
+    per_slide = per_slide.group_by("slide", maintain_order=True).agg(pl.col("y").first(), pl.col("p"))
+    slide_prob = np.stack([np.mean(np.stack(ps), axis=0) for ps in per_slide["p"]])
+    slide_auc, _ = auc(per_slide["y"].to_numpy(), slide_prob, clf.classes_)
+    return {"tile_auc": tile_auc, "slide_auc": slide_auc, "n_test_slides": per_slide.height, "n_classes_scored": n_scored}
 
 
 def sparse_codes(idx, val, d_sae):
@@ -136,10 +150,10 @@ def sparse_codes(idx, val, d_sae):
 
 
 def labels(store_dir: pathlib.Path, field: str, split: str, rows: np.ndarray):
-    """Project label (1 = TCGA-LGG) and slide id of the given store rows."""
+    """Project (the manifest label) and slide id of the given store rows."""
     ix = pl.read_parquet(store_dir / f"{field}_{split}.index.parquet")
     pos = np.searchsorted(ix["start"].to_numpy(), rows, side="right") - 1
-    return (ix["project"].to_numpy()[pos] == "TCGA-LGG").astype(int), ix["slide_id"].to_numpy()[pos]
+    return ix["project"].to_numpy()[pos].astype(str), ix["slide_id"].to_numpy()[pos]
 
 
 def main() -> None:
@@ -194,7 +208,7 @@ def main() -> None:
     if match_rows:
         pl.DataFrame(match_rows).write_csv(out / "matching.csv")
 
-    # 3. GBM vs LGG probes: raw embedding per store, and SAE codes per run.
+    # 3. Project probes (e.g. GBM vs LGG): raw embedding per store, and SAE codes per run.
     groups = set(filter(None, a.probe_groups.split(",")))
     to_probe = [r for r in runs if groups & set(r["groups"])]
     if to_probe:
@@ -208,6 +222,9 @@ def main() -> None:
             x_te = EmbeddingStore(sd, field, "test").rows(rows)
             y_tr, _ = labels(sd, field, "train", tr_rows)
             y_te, slide_te = labels(sd, field, "test", rows)
+            if len(set(y_tr)) < 2:
+                print(f"probe {store}: skipped, the training tiles have one project only ({y_tr[0]})")
+                continue
             mu, sd_ = x_tr.mean(0), x_tr.std(0).clamp_min(1e-6)
             res = probe(((x_tr - mu) / sd_).numpy(), y_tr, ((x_te - mu) / sd_).numpy(), y_te, slide_te)
             probe_rows.append({"input": f"raw:{store}", **res})

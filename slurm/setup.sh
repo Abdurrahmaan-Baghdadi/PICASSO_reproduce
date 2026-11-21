@@ -53,7 +53,7 @@ for p in "$CPU_PART" "$GPU_PART" "$TEST_CPU_PART" "$TEST_GPU_PART"; do
   else bad "no partition $p on this system: set CPU_PART / GPU_PART / TEST_CPU_PART / TEST_GPU_PART in tacc.env (sinfo -s lists them)"; fi
 done
 if [ -n "${ALLOCATION:-}" ]; then
-  if out=$(sbatch --test-only -A "$ALLOCATION" -p "$TEST_CPU_PART" -t 00:10:00 --wrap true 2>&1); then
+  if out=$(sbatch --test-only -A "$ALLOCATION" -p "$TEST_CPU_PART" -N 1 -n 1 -t 00:10:00 --wrap true 2>&1); then
     ok "allocation $ALLOCATION accepted"
   else bad "allocation $ALLOCATION rejected: $out"; fi
 fi

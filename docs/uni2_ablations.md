@@ -105,6 +105,10 @@ one row per slide and the columns
 | `patient` | Optional (or `case`). All slides of a patient go to the same split; without it the split is per slide |
 
 Other columns are ignored. The TCGA manifest (`manifests/tcga_dx_all.csv`) is one already.
+For DICOM slides named by UIDs (CCDI MCI), `scripts/manifest_from_dicom.py` builds one: it finds
+the file TRIDENT read for each slide (`wsi_states/`) and takes the patient from its DICOM header.
+Every slide gets the label `CCDI-MCI` unless `--labels` (a CSV of patient or slide_id, project)
+gives it one.
 
 To train on several datasets at once, list their TRIDENT folders and manifests in `tacc.env`,
 separated by `:`. They import into one store with one patient-level split, stratified by project:

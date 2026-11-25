@@ -268,6 +268,7 @@ th { color: var(--ink-2); font-weight: 600; } th:first-child, td:first-child { t
     <p class="note">Share of concepts by best-match correlation (A → B), averaged over the pairs of each kind.</p></div></div></section>
 
   <section id="s-probes"><div class="head"><div><h2>Probes</h2><p id="probe-desc">A logistic regression predicts each tile's project label from the raw embedding or from the SAE concepts. Tile AUC scores tiles; slide AUC scores the mean tile probability of each slide.</p></div>
+    <label id="probe-task-l">Task <select id="probe-task"></select></label>
     <label>Score <select id="probe-metric"><option value="slide_auc">Slide AUC</option><option value="tile_auc">Tile AUC</option></select></label></div>
     <div class="legend" id="probe-legend"></div><div class="chart" id="probes"></div><p class="note" id="probe-note"></p></section>
 
@@ -413,6 +414,12 @@ $("title").textContent = D.title;
 document.title = D.title;
 $("subtitle").textContent = `Ablation table ${D.table} · ${M.length} runs · generated ${D.generated}`;
 
+// probes.csv from before probe tasks has no task column: it is the all-projects probe.
+const taskOf = r => r.task || "all projects";
+const TASKS = [...new Set(D.probes.map(taskOf))];
+$("probe-task").innerHTML = TASKS.map(t => `<option>${esc(t)}</option>`).join("");
+if (TASKS.length > 1) $("probe-task").value = TASKS[TASKS.length - 1]; else $("probe-task-l").style.display = "none";
+
 function findings() {
   const out = [], enc = encoders.filter(e => S[e]);
   if (enc.length >= 2) {
@@ -432,16 +439,19 @@ function findings() {
     out.push(`Concepts: the mean best-match correlation between two seeds of one encoder is ${within.join(", ")}; between Virchow2 and UNI2 it is ${fmt(cross.reduce((s, r) => s + mm(r), 0) / cross.length, 2)}. ` +
       `A cross-encoder value near the seed baseline means the encoders learn largely the same concepts.`);
   }
-  const P = D.probes.filter(r => r.slide_auc != null);
-  if (P.length) {
+  for (const task of TASKS) {
+    const P = D.probes.filter(r => taskOf(r) === task && r.slide_auc != null);
+    if (!P.length) continue;
     const parts = encoders.map(e => {
       const raw = P.find(r => r.input === "raw:" + e), sae = P.filter(r => r.input.startsWith("sae:") && M.find(m => "sae:" + m.run_name === r.input)?.encoder === e);
       if (!raw && !sae.length) return null;
-      return `${ENC_NAME(e)}: raw ${fmt(raw?.slide_auc, 2)}` + (sae.length ? `, SAE ${fmt(sae.reduce((s, r) => s + r.slide_auc, 0) / sae.length, 2)}` : "");
+      const m = k => sae.reduce((s, r) => s + r[k], 0) / sae.length;
+      return `${ENC_NAME(e)} raw ${fmt(raw?.slide_auc, 3)} / ${fmt(raw?.tile_auc, 3)}` + (sae.length ? `, SAE ${fmt(m("slide_auc"), 3)} / ${fmt(m("tile_auc"), 3)}` : "");
     }).filter(Boolean);
-    out.push(`Project probes (slide AUC) — ${parts.join("; ")}. An SAE close to its raw embedding keeps the label information in its concepts.`);
+    out.push(`Probe, ${task} (slide / tile AUC): ${parts.join("; ")}.` + (task === "all projects" && mixedDatasets()
+      ? ` These projects come from different datasets (${[...new Set(projects.map(p => p.split("-")[0]))].join(", ")}), so the probe partly learns the dataset, not only the diagnosis.` : ""));
   }
-  if (mixedDatasets()) out.push(`The data mixes datasets (${[...new Set(projects.map(p => p.split("-")[0]))].join(", ")}), so the probes partly learn which dataset a tile came from, not only the diagnosis.`);
+  if (D.probes.length) out.push("An SAE close to its raw embedding keeps the label information in its concepts.");
   if (D.dataset.import && D.dataset.import.max_slides_per_project) out.push(`This is a small test import (${D.dataset.import.max_slides_per_project} slides per project, ≤ ${D.dataset.import.max_tiles_per_slide} tiles each), so these numbers check the pipeline, not the science.`);
   $("findings").innerHTML = out.length ? out.map(t => `<li>${t}</li>`).join("") : `<li class="empty">Not enough runs for a summary.</li>`;
 }
@@ -558,7 +568,7 @@ function concepts() {
 }
 
 function probes() {
-  const k = $("probe-metric").value, P = D.probes;
+  const k = $("probe-metric").value, task = $("probe-task").value, P = D.probes.filter(r => taskOf(r) === task);
   if (!P.length) { $("probes").innerHTML = `<p class="empty">No probes.csv (the training tiles may hold one project only).</p>`; return; }
   const rows = [];
   for (const e of encoders) for (const r of P) {
@@ -573,7 +583,8 @@ function probes() {
   dotPlot($("probes"), rows, {aria: "Probe AUC", min: 0.5, max: 1, valFmt: v => fmt(v, 3)});
   const nc = Math.max(...P.map(r => r.n_classes_scored || 2)), nt = Math.max(...P.map(r => r.n_test_slides || 0));
   $("probe-note").textContent = `AUC 0.5 is chance, 1 is perfect. ${nc > 2 ? `${nc} projects: the mean one-vs-rest AUC.` : "Two projects: binary AUC."} ${nt ? `${nt} test slides; ` : ""}with few test slides the slide AUC moves in large steps.` +
-    (mixedDatasets() ? " The projects come from different datasets, so part of what the probe learns is the dataset." : "");
+    (task === "all projects" && mixedDatasets() ? " The projects come from different datasets, so part of what the probe learns is the dataset." : "") +
+    (task !== "all projects" ? " Trained and tested on these projects' tiles only." : "");
 }
 
 function table() {
@@ -585,7 +596,7 @@ function table() {
 
 function drawCharts() { recon(); train(); concepts(); probes(); }
 findings(); dataSection(); cards(); table(); drawCharts();
-$("recon-metric").onchange = recon; $("train-group").onchange = train; $("match-metric").onchange = concepts; $("probe-metric").onchange = probes;
+$("recon-metric").onchange = recon; $("train-group").onchange = train; $("match-metric").onchange = concepts; $("probe-metric").onchange = probes; $("probe-task").onchange = probes;
 let rt; addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(drawCharts, 150); });
 // Theme: follows the system; the button forces the other one.
 const darkNow = () => document.documentElement.dataset.theme ? document.documentElement.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;

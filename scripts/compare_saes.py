@@ -14,6 +14,10 @@ run on the same ``--n-rows`` random test tiles. Writes to ``--out``:
                         GBM vs LGG) from raw embeddings and from SAE codes, for ``--probe-groups``:
                         tile AUC and slide AUC of the mean tile probability. With more than two
                         projects, the AUC is the mean one-vs-rest AUC over projects in the test split.
+                        One row per input and task (``--probe-tasks``): all projects, and subsets such
+                        as TCGA-GBM vs TCGA-LGG, trained and tested on those projects' tiles only.
+
+``--skip-matching`` reruns only the metrics and probes (and keeps the matching files).
 
     python scripts/compare_saes.py ablations/sae_brain.tsv --device cuda
 """
@@ -36,7 +40,11 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--n-rows", type=int, default=200_000, help="test tiles used for matching")
     p.add_argument("--min-freq", type=float, default=1e-3, help="concepts rarer than this are not matched")
     p.add_argument("--probe-groups", default="main", help="comma-separated groups to probe ('' = none)")
-    p.add_argument("--probe-train-rows", type=int, default=100_000)
+    p.add_argument("--probe-train-rows", type=int, default=100_000, help="training tiles per probe task")
+    p.add_argument("--probe-tasks", default="all;TCGA-GBM,TCGA-LGG",
+                   help="';'-separated probe tasks: 'all' (every project) or comma-separated projects. "
+                        "A task with fewer than two of its projects in the store is skipped")
+    p.add_argument("--skip-matching", action="store_true", help="only metrics and probes; keep matching.csv")
     p.add_argument("--batch-size", type=int, default=8192)
     p.add_argument("--device", default="cuda")
     return p.parse_args()
@@ -156,6 +164,14 @@ def labels(store_dir: pathlib.Path, field: str, split: str, rows: np.ndarray):
     return ix["project"].to_numpy()[pos].astype(str), ix["slide_id"].to_numpy()[pos]
 
 
+def rows_in(store_dir: pathlib.Path, field: str, split: str, projects: set[str]) -> np.ndarray:
+    """Store rows of the slides in ``projects``, sorted."""
+    ix = pl.read_parquet(store_dir / f"{field}_{split}.index.parquet").filter(pl.col("project").is_in(sorted(projects)))
+    if not ix.height:
+        return np.zeros(0, np.int64)
+    return np.concatenate([np.arange(s, s + n) for s, n in zip(ix["start"].to_list(), ix["n"].to_list())])
+
+
 def main() -> None:
     a = parse_args()
     runs = [r for r in read_table(a.table) if (a.output_root / "sae" / r["run_name"] / "eval" / "summary.json").exists()]
@@ -191,12 +207,18 @@ def main() -> None:
             raise SystemExit(f"store {store} holds other test tiles than the first store; re-import with one import_trident.py run")
     n_test = int(ref_index["n"].sum())
     rows = np.sort(np.random.default_rng(0).choice(n_test, size=min(a.n_rows, n_test), replace=False))
+    groups = set(filter(None, a.probe_groups.split(",")))
+    to_probe = [r for r in runs if groups & set(r["groups"])]
+    main_names = [] if a.skip_matching else [r["run_name"] for r in runs if "main" in r["groups"]]
+    needed = set(main_names) | {r["run_name"] for r in to_probe}
     codes = {}
     for (store, field), rs in by_store.items():
+        rs = [r for r in rs if r["run_name"] in needed]
+        if not rs:
+            continue
         x = EmbeddingStore(a.data_root / "store" / store, field, "test").rows(rows)
         for r in rs:
             codes[r["run_name"]] = encode(r, x, a)
-    main_names = [r["run_name"] for r in runs if "main" in r["groups"]]
     enc_of = {r["run_name"]: r["encoder"] for r in runs}
     pairs = [(p, q, "seed" if enc_of[p] == enc_of[q] else "encoder") for p, q in itertools.combinations(main_names, 2)]
     match_rows = []
@@ -208,34 +230,56 @@ def main() -> None:
     if match_rows:
         pl.DataFrame(match_rows).write_csv(out / "matching.csv")
 
-    # 3. Project probes (e.g. GBM vs LGG): raw embedding per store, and SAE codes per run.
-    groups = set(filter(None, a.probe_groups.split(",")))
-    to_probe = [r for r in runs if groups & set(r["groups"])]
+    # 3. Project probes (e.g. GBM vs LGG): raw embedding per store, and SAE codes per run, per task.
     if to_probe:
         probe_rows = []
-        stores = {(r["store"], r["field"]) for r in to_probe}
-        n_train = EmbeddingStore(a.data_root / "store" / next(iter(stores))[0], next(iter(stores))[1], "train").n
-        tr_rows = np.sort(np.random.default_rng(1).choice(n_train, size=min(a.probe_train_rows, n_train), replace=False))
-        for store, field in sorted(stores):
-            sd = a.data_root / "store" / store
-            x_tr = EmbeddingStore(sd, field, "train").rows(tr_rows)
-            x_te = EmbeddingStore(sd, field, "test").rows(rows)
-            y_tr, _ = labels(sd, field, "train", tr_rows)
-            y_te, slide_te = labels(sd, field, "test", rows)
-            if len(set(y_tr)) < 2:
-                print(f"probe {store}: skipped, the training tiles have one project only ({y_tr[0]})")
+        stores = sorted({(r["store"], r["field"]) for r in to_probe})
+        sd0 = a.data_root / "store" / stores[0][0]
+        y_all, _ = labels(sd0, stores[0][1], "test", rows)
+        present = set(y_all)
+        tasks, seen = [], set()
+        for t in filter(None, (t.strip() for t in a.probe_tasks.split(";"))):
+            projs = present if t == "all" else set(t.split(",")) & present
+            if len(projs) < 2:
+                print(f"probe task {t}: skipped, fewer than two of its projects in the test tiles")
                 continue
-            mu, sd_ = x_tr.mean(0), x_tr.std(0).clamp_min(1e-6)
-            res = probe(((x_tr - mu) / sd_).numpy(), y_tr, ((x_te - mu) / sd_).numpy(), y_te, slide_te)
-            probe_rows.append({"input": f"raw:{store}", **res})
-            print(f"probe raw {store}: tile AUC {res['tile_auc']:.3f}, slide AUC {res['slide_auc']:.3f}")
-            for r in (r for r in to_probe if (r["store"], r["field"]) == (store, field)):
-                i_tr, v_tr, d_sae = encode(r, x_tr, a)
-                i_te, v_te, _ = codes[r["run_name"]]
-                res = probe(sparse_codes(i_tr, v_tr, d_sae), y_tr, sparse_codes(i_te, v_te, d_sae), y_te, slide_te)
-                probe_rows.append({"input": f"sae:{r['run_name']}", **res})
-                print(f"probe sae {r['run_name']}: tile AUC {res['tile_auc']:.3f}, slide AUC {res['slide_auc']:.3f}")
-        pl.DataFrame(probe_rows).write_csv(out / "probes.csv")
+            if frozenset(projs) in seen:
+                continue   # e.g. TCGA-GBM,TCGA-LGG when the store holds only those two
+            seen.add(frozenset(projs))
+            name = "all projects" if t == "all" else " vs ".join(p for p in t.split(",") if p in projs)
+            tasks.append((name, t == "all", projs))
+        n_train = EmbeddingStore(sd0, stores[0][1], "train").n
+        for name, is_all, projs in tasks:
+            if is_all:   # as before: a random sample of all training tiles
+                tr_rows = np.sort(np.random.default_rng(1).choice(n_train, size=min(a.probe_train_rows, n_train), replace=False))
+                te_mask = np.ones(len(rows), bool)
+            else:
+                pool = rows_in(sd0, stores[0][1], "train", projs)
+                tr_rows = np.sort(np.random.default_rng(1).choice(pool, size=min(a.probe_train_rows, len(pool)), replace=False))
+                te_mask = np.isin(y_all, sorted(projs))
+            te_rows = rows[te_mask]
+            print(f"probe task {name}: {len(tr_rows):,} training tiles, {len(te_rows):,} test tiles")
+            for store, field in stores:
+                sd = a.data_root / "store" / store
+                x_tr = EmbeddingStore(sd, field, "train").rows(tr_rows)
+                x_te = EmbeddingStore(sd, field, "test").rows(te_rows)
+                y_tr, _ = labels(sd, field, "train", tr_rows)
+                y_te, slide_te = labels(sd, field, "test", te_rows)
+                if len(set(y_tr)) < 2:
+                    print(f"probe {name} {store}: skipped, the training tiles have one project only ({y_tr[0]})")
+                    continue
+                mu, sd_ = x_tr.mean(0), x_tr.std(0).clamp_min(1e-6)
+                res = probe(((x_tr - mu) / sd_).numpy(), y_tr, ((x_te - mu) / sd_).numpy(), y_te, slide_te)
+                probe_rows.append({"task": name, "input": f"raw:{store}", **res})
+                print(f"probe {name} raw {store}: tile AUC {res['tile_auc']:.3f}, slide AUC {res['slide_auc']:.3f}")
+                for r in (r for r in to_probe if (r["store"], r["field"]) == (store, field)):
+                    i_tr, v_tr, d_sae = encode(r, x_tr, a)
+                    i_te, v_te, _ = codes[r["run_name"]]
+                    res = probe(sparse_codes(i_tr, v_tr, d_sae), y_tr, sparse_codes(i_te[te_mask], v_te[te_mask], d_sae), y_te, slide_te)
+                    probe_rows.append({"task": name, "input": f"sae:{r['run_name']}", **res})
+                    print(f"probe {name} sae {r['run_name']}: tile AUC {res['tile_auc']:.3f}, slide AUC {res['slide_auc']:.3f}")
+        if probe_rows:
+            pl.DataFrame(probe_rows).write_csv(out / "probes.csv")
 
 
 if __name__ == "__main__":

@@ -126,8 +126,11 @@ project. Things to keep in mind:
   tiling (20x, 256 px) and encoders.
 - `PROJECTS` filters every manifest. Leave it empty to keep everything a manifest lists and
   TRIDENT has features for (the TCGA folder only holds GBM and LGG).
-- With mixed datasets, the probes partly learn which dataset a tile came from, because the
-  projects of different datasets never overlap. Compare encoders with that in mind.
+- With mixed datasets, the all-projects probe partly learns which dataset a tile came from,
+  because the projects of different datasets never overlap. The TCGA-GBM vs TCGA-LGG probe is
+  trained and tested on TCGA tiles only, so it compares the encoders on diagnosis alone. To
+  rerun only the metrics and probes (about 15 minutes), keeping the concept matching:
+  `COMPARE_ARGS=--skip-matching bash slurm/submit.sh compare ablations/sae_brain.tsv`.
 - A larger train split needs more RAM (`in_memory: true` loads it): roughly 2.6 KB per tile for
   Virchow2 and 3 KB for UNI2. Three UNI2 runs on one 256 GB Lonestar6 node fit up to about
   25M train tiles; set `PER_NODE=1` (or `in_memory: false` in the grid) above that.
@@ -160,4 +163,4 @@ rerun `make_ablations.py`; finished runs are kept.
 | `matching.csv` | Best-match correlation of concepts, for seed pairs and encoder pairs |
 | `matches_<A>__<B>.parquet` | Best match of every concept, to look at shared and encoder-only concepts |
 | `report.html` | All of the above as one page for a meeting (`scripts/report_html.py`; written after every comparison, opens offline) |
-| `probes.csv` | Logistic probes predicting the manifest's `project` (GBM vs LGG for TCGA), raw embeddings vs SAE codes (tile and slide AUC; mean one-vs-rest AUC with more than two projects) |
+| `probes.csv` | Logistic probes predicting the manifest's `project`, raw embeddings vs SAE codes (tile and slide AUC; mean one-vs-rest AUC with more than two projects). One row per task: all projects, and TCGA-GBM vs TCGA-LGG on those tiles only (`--probe-tasks`) |

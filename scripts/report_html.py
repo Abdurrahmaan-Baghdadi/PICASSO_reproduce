@@ -55,7 +55,8 @@ def pretty(run: str) -> str:
 
 
 def curve(run_dir: pathlib.Path, bins: int = 250) -> dict:
-    """Training explained variance per batch, averaged into at most ``bins`` points; validation per epoch."""
+    """Validation explained variance after each epoch (as the test metric), and the training batches'
+    explained variance averaged into at most ``bins`` points (residual mean removed, so it reads higher)."""
     steps, ev, val = [], [], []
     path = run_dir / "log.jsonl"
     if not path.exists():
@@ -65,16 +66,16 @@ def curve(run_dir: pathlib.Path, bins: int = 250) -> dict:
             r = json.loads(line)
         except json.JSONDecodeError:
             continue
-        if "step" in r and r.get("ev_batch") is not None:
+        if r.get("ev_batch") is not None:
             steps.append(r["step"]), ev.append(r["ev_batch"])
-        elif "step" not in r and r.get("explained_variance") is not None:
-            val.append(r["explained_variance"])
+        elif r.get("split") == "val" and r.get("explained_variance") is not None:
+            val.append([r.get("epoch", len(val)) + 1, round(r["explained_variance"], 5)])
     pts = []
     per = max(1, math.ceil(len(steps) / bins))
     for i in range(0, len(steps), per):
         s, e = steps[i:i + per], ev[i:i + per]
         pts.append([s[-1], round(sum(e) / len(e), 5)])
-    return {"train": pts, "val": [round(v, 5) for v in val]}
+    return {"train": pts, "val": val}
 
 
 def dataset(store_dir: pathlib.Path | None, data_root: pathlib.Path) -> dict:
@@ -256,7 +257,7 @@ th { color: var(--ink-2); font-weight: 600; } th:first-child, td:first-child { t
     <label>Metric <select id="recon-metric"></select></label></div>
     <div class="legend" id="recon-legend"></div><div class="chart" id="recon"></div></section>
 
-  <section id="s-train"><div class="head"><div><h2>Training</h2><p>Explained variance of each training batch, averaged over windows of steps. A curve still rising at the end means more epochs would help.</p></div>
+  <section id="s-train"><div class="head"><div><h2>Training</h2><p id="train-desc"></p></div>
     <label>Group <select id="train-group"></select></label></div>
     <div class="legend" id="train-legend"></div><div class="chart" id="train"></div></section>
 
@@ -475,9 +476,12 @@ function cards() {
     : `<p class="empty">No main runs in main_summary.csv.</p>`;
 }
 
-const baseKey = Object.keys(M[0]).find(k => k.startsWith("baseline_pca_"));
+// PCA baseline per run: the one whose component count is closest to the run's concepts per tile (k).
+const pcaKeys = Object.keys(M[0]).filter(k => /^baseline_pca_\d+$/.test(k)), baseKey = pcaKeys.length > 0;
+const pcaKey = r => pcaKeys.reduce((b, k) => Math.abs(+k.split("_").pop() - (r.l0 || 0)) < Math.abs(+b.split("_").pop() - (r.l0 || 0)) ? k : b, pcaKeys[0]);
 const RECON = [
-  ["explained_variance", "Explained variance", "Higher is better." + (baseKey ? ` The grey tick is PCA with ${baseKey.split("_").pop()} components on the same tiles, a linear baseline.` : ""), true],
+  ["explained_variance", "Explained variance", "Higher is better." + (baseKey ? (pcaKeys.length > 1 ? " The grey tick is PCA with as many components as the run uses concepts per tile (k), on the same tiles: a linear baseline."
+  : ` The grey tick is PCA with ${pcaKeys[0].split("_").pop()} components on the same tiles, a linear baseline.`) : ""), true],
   ["explained_variance_per_sample", "Explained variance per tile", "Higher is better. Explained variance of each tile, averaged.", false],
   ["cosine", "Cosine similarity", "Higher is better. Cosine between each tile's embedding and its reconstruction.", false],
   ["n_dead", "Dead concepts", "Lower is better. Concepts that never fire on the test tiles.", false],
@@ -492,22 +496,28 @@ function recon() {
   $("recon-desc").textContent = m[2];
   const rows = [];
   for (const g of groupsOrder) for (const r of M.filter(r => String(r.groups).split(",")[0] === g))
-    rows.push({group: g, label: r.label, v: r[m[0]], color: encVar(r.encoder), ref: m[3] && baseKey ? r[baseKey] : null,
-      tip: `${r.run_name}\n${m[1]}: ${fmt(r[m[0]], 4)}` + (m[3] && baseKey ? `\nPCA baseline: ${fmt(r[baseKey], 4)}` : "") + `\nGroups: ${r.groups}`});
+    rows.push({group: g, label: r.label, v: r[m[0]], color: encVar(r.encoder), ref: m[3] && baseKey ? r[pcaKey(r)] : null,
+      tip: `${r.run_name}\n${m[1]}: ${fmt(r[m[0]], 4)}` + (m[3] && baseKey ? `\nPCA, ${pcaKey(r).split("_").pop()} components: ${fmt(r[pcaKey(r)], 4)}` : "") + `\nGroups: ${r.groups}`});
   legend($("recon-legend"), encoders.map(e => ({name: ENC_NAME(e), color: encVar(e)})).concat(m[3] && baseKey ? [{name: "PCA baseline", kind: "tick"}] : []));
   dotPlot($("recon"), rows, {aria: m[1] + " of every run", valFmt: m[0].startsWith("n_") ? v => fmt(v, 0) : v => fmt(v, 3)});
 }
 
-const curveGroups = groupsOrder.filter(g => M.some(r => String(r.groups).split(",")[0] === g && D.curves[r.run_name] && (D.curves[r.run_name].train || []).length));
+const hasVal = M.some(r => ((D.curves[r.run_name] || {}).val || []).length > 1), CK = hasVal ? "val" : "train";
+$("train-desc").textContent = hasVal
+  ? "Validation explained variance after each epoch, measured like the test metric. A curve still rising at the end means more epochs would help."
+  : "Explained variance of each training batch, averaged over windows of steps. A curve still rising at the end means more epochs would help.";
+const curveGroups = groupsOrder.filter(g => M.some(r => String(r.groups).split(",")[0] === g && D.curves[r.run_name] && (D.curves[r.run_name][CK] || []).length));
 $("train-group").innerHTML = ["all"].concat(curveGroups).map(g => `<option value="${g}">${g === "all" ? "All runs" : g}</option>`).join("");
 if (curveGroups.includes("main")) $("train-group").value = "main";
 function train() {
   const g = $("train-group").value, runs = M.filter(r => g === "all" || String(r.groups).split(",")[0] === g);
   const seen = {};
   const series = runs.map(r => { const k = r.encoder; seen[k] = (seen[k] || 0) + 1;
-    return {name: r.label, color: encVar(r.encoder), dash: g !== "main" && seen[k] > 1 ? "6 4" : null, pts: (D.curves[r.run_name] || {}).train || []}; });
+    return {name: r.label, color: encVar(r.encoder), dash: g !== "main" && seen[k] > 1 ? "6 4" : null, pts: (D.curves[r.run_name] || {})[CK] || []}; });
   legend($("train-legend"), encoders.filter(e => runs.some(r => r.encoder === e)).map(e => ({name: ENC_NAME(e), color: encVar(e), kind: "line"})));
-  lineChart($("train"), series, {aria: "Training explained variance by step", xname: "step", xlabel: "training step", yFmt: v => pct(v, 1), what: "training logs"});
+  lineChart($("train"), series, hasVal
+    ? {aria: "Validation explained variance by epoch", xname: "epoch", xlabel: "epoch", yFmt: v => pct(v, 1), what: "validation logs"}
+    : {aria: "Training explained variance by step", xname: "step", xlabel: "training step", yFmt: v => pct(v, 1), what: "training logs"});
 }
 
 const MATCH = [["mean", "Mean best match"], ["median", "Median best match"], ["frac_gt_0.5", "Share of concepts matched > 0.5"], ["frac_gt_0.7", "Share of concepts matched > 0.7"]];

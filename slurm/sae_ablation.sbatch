@@ -24,4 +24,5 @@ for p in ${pids[@]+"${pids[@]}"}; do wait "$p" || status=1; done
 [ "$status" = 0 ] || { echo "some runs failed: see $OUTPUT_ROOT/logs/sae_*.log" >&2; exit 1; }
 if [ -n "${THEN_COMPARE:-}" ]; then
   python scripts/compare_saes.py "$TSV" --device cuda ${COMPARE_ARGS:-}
+  python scripts/report_html.py "$TSV"
 fi

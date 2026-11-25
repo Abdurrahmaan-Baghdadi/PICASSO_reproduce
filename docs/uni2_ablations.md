@@ -159,4 +159,5 @@ rerun `make_ablations.py`; finished runs are kept.
 | `main_summary.csv` | Mean and std over seeds, per encoder |
 | `matching.csv` | Best-match correlation of concepts, for seed pairs and encoder pairs |
 | `matches_<A>__<B>.parquet` | Best match of every concept, to look at shared and encoder-only concepts |
+| `report.html` | All of the above as one page for a meeting (`scripts/report_html.py`; written after every comparison, opens offline) |
 | `probes.csv` | Logistic probes predicting the manifest's `project` (GBM vs LGG for TCGA), raw embeddings vs SAE codes (tile and slide AUC; mean one-vs-rest AUC with more than two projects) |

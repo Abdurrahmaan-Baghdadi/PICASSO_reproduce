@@ -9,3 +9,4 @@
 set -euo pipefail
 source slurm/common.sh
 python scripts/compare_saes.py "$1" --device cuda ${COMPARE_ARGS:-}
+python scripts/report_html.py "$1"

@@ -85,12 +85,27 @@ class TileItems(Dataset):
         return torch.from_numpy(np.asarray(im, dtype=np.uint8).copy()), i
 
 
+def slide_paths(cfg: PairsConfig) -> dict[str, str]:
+    """slide_id -> slide file, for the slides whose file is known (imports without --slides-dir have none)."""
+    summary = pl.read_parquet(cfg.tiles_dir / "slides_summary.parquet")
+    return {s: p for s, p in zip(summary["slide_id"], summary["path"]) if p}
+
+
 def select_rows(cfg: PairsConfig, split: str, n: int, rng: np.random.Generator) -> list[tuple[str, np.ndarray]]:
-    """Per slide (this shard only): sorted local tile indices chosen for the pair set."""
+    """Per slide (this shard only): sorted local tile indices chosen for the pair set.
+    Only slides with a slide file take part: pixels are read from it."""
     idx = pl.read_parquet(cfg.store_dir / f"cls_{split}.index.parquet")
+    paths = slide_paths(cfg)
+    kept = idx.filter(pl.col("slide_id").is_in(list(paths)))
+    if kept.height < idx.height and cfg.shard == 0:
+        logger.warning("%s: %d of %d slides (%d of %d tiles) have no slide file and are left out", split,
+                       idx.height - kept.height, idx.height, int(idx["n"].sum() - kept["n"].sum()), int(idx["n"].sum()))
+    if kept.height == 0:
+        raise SystemExit(f"no {split} slide has a slide file: import with --slides-dir (SLIDES_DIR in tacc.env)")
+    idx = kept
     total = int(idx["n"].sum())
     rows = np.arange(total) if n < 0 or n >= total else np.sort(rng.choice(total, size=n, replace=False))
-    starts = idx["start"].to_numpy()
+    starts = np.concatenate([[0], np.cumsum(idx["n"].to_numpy())[:-1]])   # rows of the kept slides only
     slide_pos = np.searchsorted(starts, rows, side="right") - 1      # sorted, because rows are sorted
     local = rows - starts[slide_pos]
     uniq, first = np.unique(slide_pos, return_index=True)
@@ -102,8 +117,7 @@ def select_rows(cfg: PairsConfig, split: str, n: int, rng: np.random.Generator) 
 
 @torch.inference_mode()
 def encode(cfg: PairsConfig, split: str, chosen: list[tuple[str, np.ndarray]], vae, keep_tiles: bool) -> None:
-    summary = pl.read_parquet(cfg.tiles_dir / "slides_summary.parquet")
-    path_of = dict(zip(summary["slide_id"], summary["path"]))
+    path_of = slide_paths(cfg)
     items, embs, index = [], [], []
     for sid, loc in chosen:
         tiles = pl.read_parquet(cfg.tiles_dir / sid / "tiles.parquet")
@@ -165,6 +179,10 @@ def run(cfg: PairsConfig) -> pathlib.Path:
     cfg.output_dir.mkdir(parents=True, exist_ok=True)
     if cfg.merge:
         merge_shards(cfg)
+        return cfg.output_dir
+    # A shard's train index is written last; train_index.parquet exists once the shards are merged.
+    if any((cfg.output_dir / f).exists() for f in (f"train_shard{cfg.shard}_index.parquet", "train_index.parquet")):
+        logger.info("shard %d already done in %s", cfg.shard, cfg.output_dir)
         return cfg.output_dir
     dump_json(cfg.output_dir / f"run_config_shard{cfg.shard}.json", cfg)
     from diffusers import AutoencoderKL

@@ -164,3 +164,22 @@ rerun `make_ablations.py`; finished runs are kept.
 | `matches_<A>__<B>.parquet` | Best match of every concept, to look at shared and encoder-only concepts |
 | `report.html` | All of the above as one page for a meeting (`scripts/report_html.py`; written after every comparison, opens offline) |
 | `probes.csv` | Logistic probes predicting the manifest's `project`, raw embeddings vs SAE codes (tile and slide AUC; mean one-vs-rest AUC with more than two projects). One row per task: all projects, and TCGA-GBM vs TCGA-LGG on those tiles only (`--probe-tasks`) |
+
+## Emb2Img on TACC (Virchow2 only)
+
+Emb2Img turns a Virchow2 CLS embedding back into a tile, so SAE concepts can be looked at
+(`scripts/concept_intervention.py`, `scripts/sae_recon_gen.py`). It reads tile pixels from the
+slides, so it needs `SLIDES_DIR` at import time; slides without a file (e.g. DICOM folders the
+import did not resolve) are left out, and the pairs log says how many. After the data job:
+
+```bash
+bash slurm/submit.sh emb2img-download   # login node, once: weights into $HF_HOME (Virchow2 is gated: hf auth login first)
+bash slurm/submit.sh emb2img-test       # dev queue: 20k pairs, 100 steps, 64 samples; log ends with the full-schedule time
+bash slurm/submit.sh emb2img            # pairs (SHARDS=8 array) -> merge -> train 16,000 steps -> sampling + eval
+bash slurm/submit.sh emb2img-train      # if training hit its 24 h limit: resumes from the last checkpoint
+```
+
+`N_TRAIN` (default 16.4M pairs, about 180 GB on `$SCRATCH`) and `TRAIN_ARGS="steps=..."` shrink
+the run. Results: `$OUTPUT_ROOT/emb2img_sd15_256/ema` (model) and `eval/grid.jpg` (real tiles
+above, generated below) with `eval/summary.json` (cosine of the generated tile's CLS to the
+conditioning CLS, against shuffled and nearest-neighbour baselines).

@@ -169,7 +169,8 @@ rerun `make_ablations.py`; finished runs are kept.
 
 Emb2Img turns a Virchow2 CLS embedding back into a tile, so SAE concepts can be looked at
 (`scripts/concept_intervention.py`, `scripts/sae_recon_gen.py`). It reads tile pixels from the
-slides, so it needs `SLIDES_DIR` at import time; slides without a file (e.g. DICOM folders the
+slides, so it needs `SLIDES_DIR` at import time, or `scripts/add_slide_paths.py` afterwards (fills in the
+files without re-importing; DICOM slides via the manifest's `dicom_path`). Slides without a file (e.g. DICOM the
 import did not resolve) are left out, and the pairs log says how many. After the data job:
 
 ```bash

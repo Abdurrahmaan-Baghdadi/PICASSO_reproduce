@@ -50,7 +50,7 @@ Data: `~/Documents/Pediatric Brain Tumor Research/localDataStore/tcga_gbm_lgg/ws
 - UNI2: 1,702 slides, `[n, 1536]`.
 - ~12.1M Virchow2 tiles estimated. 221 slides lack Virchow2 features (interrupted run; lock files remain).
 - Datastore `README`, `manifest/`, `clinical/`, `path_reports/` are empty.
-- Raw slides on TACC: `/scratch/<project>/<user>/pbt_picasso/tcga/slides`. TRIDENT outputs on TACC live in another user's `/scratch`; read access must be confirmed.
+- Raw slides on TACC: in a lab member's `/scratch` (path kept out of this public repo; see `SLIDES_DIR` in your `tacc.env`). TRIDENT outputs on TACC live in another user's `/scratch`; read access must be confirmed.
 
 Done locally:
 

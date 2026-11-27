@@ -1,14 +1,48 @@
 __pycache__/
 *.egg-info/
+
+# Settings with allocation and paths
+/tacc.env
+.env
+
+# Data and results: folders wherever a run writes them (DATA_ROOT / OUTPUT_ROOT inside the repo)
 /data/
+/data*/
 /outputs/
+/outputs*/
+/results*/
+/slurm_logs/
+slurm-*.out
+hf_cache/
+/ablations/*_tacc.tsv
+
+# Data and results: file types, in case a run writes them somewhere else in the repo
 *.pt
+*.pth
+*.ckpt
+*.bin
+*.safetensors
 *.npy
 *.npz
-*.safetensors
+*.parquet
+*.h5
+*.hdf5
+*.jsonl
+report*.html
+*.jpg
+*.jpeg
+*.png
+!docs/**/*.png
+
+# Slides
 *.svs
-/data_*/
-/outputs_*/
-/slurm_logs/
-/tacc.env
-/ablations/smoke_tacc.tsv
+*.dcm
+*.ndpi
+*.mrxs
+*.scn
+*.tif
+*.tiff
+
+# Manifests can hold patient IDs (e.g. CCDI): only the public TCGA one is committed
+/manifests/*
+!/manifests/tcga_dx_all.csv
